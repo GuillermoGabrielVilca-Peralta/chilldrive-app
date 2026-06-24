@@ -17,7 +17,7 @@ class _DetalleViajeScreenState extends State<DetalleViajeScreen>
 
   Map<String, dynamic>? _viaje;
   List<Map<String, dynamic>> _eventos = [];
-  List<LatLng> _recorrido = [];
+  List<List<double>> _recorrido = []; // [lat, lon, speed_kmh]
 
   bool _loading = true;
   String? _error;
@@ -59,9 +59,7 @@ class _DetalleViajeScreenState extends State<DetalleViajeScreen>
         setState(() {
           _viaje     = viaje as Map<String, dynamic>?;
           _eventos   = eventos.cast<Map<String, dynamic>>();
-          _recorrido = waypoints
-              .map((w) => LatLng(w[0], w[1]))
-              .toList();
+          _recorrido = waypoints;
         });
       }
     } catch (e) {
@@ -145,7 +143,7 @@ class _DetalleViajeScreenState extends State<DetalleViajeScreen>
     // Centro del mapa: primer waypoint, primer evento con coords, o Lima
     LatLng centro = const LatLng(-12.0464, -77.0428);
     if (_recorrido.isNotEmpty) {
-      centro = _recorrido.first;
+      centro = LatLng(_recorrido.first[0], _recorrido.first[1]);
     } else if (conCoords.isNotEmpty) {
       centro = LatLng(
         (conCoords.first['latitud'] as num).toDouble(),
@@ -173,6 +171,22 @@ class _DetalleViajeScreenState extends State<DetalleViajeScreen>
             ),
           ),
 
+        // ── Leyenda de colores ──────────────────────────────────────────────
+        if (_recorrido.length >= 2)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _leyenda(Colors.blue.shade600, 'Suave'),
+                const SizedBox(width: 20),
+                _leyenda(Colors.orange.shade500, 'Moderado'),
+                const SizedBox(width: 20),
+                _leyenda(Colors.red.shade500, 'Agresivo'),
+              ],
+            ),
+          ),
+
         // ── Mapa ────────────────────────────────────────────────────────────
         Expanded(
           child: sinDatos
@@ -191,27 +205,21 @@ class _DetalleViajeScreenState extends State<DetalleViajeScreen>
                       userAgentPackageName: 'com.example.chilldrive_app',
                     ),
 
-                    // Polilínea de la ruta
+                    // Polilínea coloreada por tasa de aceleración
                     if (_recorrido.length >= 2)
-                      PolylineLayer(
-                        polylines: [
-                          Polyline(
-                            points: _recorrido,
-                            strokeWidth: 4,
-                            color: Colors.blue.shade600,
-                          ),
-                        ],
-                      ),
+                      PolylineLayer(polylines: _segmentosColoreados()),
 
                     // Marcadores de inicio y fin de ruta
                     if (_recorrido.isNotEmpty)
                       MarkerLayer(
                         markers: [
-                          _marcadorRuta(_recorrido.first, Icons.play_arrow,
-                              Colors.green),
+                          _marcadorRuta(
+                              LatLng(_recorrido.first[0], _recorrido.first[1]),
+                              Icons.play_arrow, Colors.green),
                           if (_recorrido.length > 1)
-                            _marcadorRuta(_recorrido.last, Icons.flag,
-                                Colors.red),
+                            _marcadorRuta(
+                                LatLng(_recorrido.last[0], _recorrido.last[1]),
+                                Icons.flag, Colors.red),
                         ],
                       ),
 
@@ -430,6 +438,44 @@ class _DetalleViajeScreenState extends State<DetalleViajeScreen>
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
+
+  /// Cada segmento se colorea según el cambio de velocidad entre puntos consecutivos:
+  /// azul = suave (<10 km/h en 10 s), naranja = moderado (10-20), rojo = agresivo (>20)
+  List<Polyline> _segmentosColoreados() {
+    final segments = <Polyline>[];
+    for (int i = 0; i < _recorrido.length - 1; i++) {
+      final w1 = _recorrido[i];
+      final w2 = _recorrido[i + 1];
+      final v1 = w1.length > 2 ? w1[2] : 0.0;
+      final v2 = w2.length > 2 ? w2[2] : 0.0;
+      final deltaV = (v2 - v1).abs();
+
+      final color = deltaV >= 20
+          ? Colors.red.shade500
+          : deltaV >= 10
+              ? Colors.orange.shade500
+              : Colors.blue.shade600;
+
+      segments.add(Polyline(
+        points: [LatLng(w1[0], w1[1]), LatLng(w2[0], w2[1])],
+        strokeWidth: 5,
+        color: color,
+      ));
+    }
+    return segments;
+  }
+
+  Widget _leyenda(Color color, String label) => Row(
+        children: [
+          Container(
+            width: 20, height: 4,
+            decoration: BoxDecoration(
+              color: color, borderRadius: BorderRadius.circular(2)),
+          ),
+          const SizedBox(width: 5),
+          Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+        ],
+      );
 
   Color _colorImpacto(int pts) {
     if (pts > 0) return Colors.green.shade500;

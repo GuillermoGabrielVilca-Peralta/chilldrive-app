@@ -123,7 +123,9 @@ class _DeteccionScreenState extends State<DeteccionScreen>
       if (_servicioActivo && (_segundos - _segundosUltimoWaypoint) >= 10) {
         _segundosUltimoWaypoint = _segundos;
         if (_ultimaPos != null) {
-          _recorrido.add([_ultimaPos!.latitude, _ultimaPos!.longitude]);
+          final rawSpeed = _ultimaPos!.speed;
+          final speedKmh = rawSpeed < 0 ? 0.0 : rawSpeed * 3.6;
+          _recorrido.add([_ultimaPos!.latitude, _ultimaPos!.longitude, speedKmh]);
         }
       }
       // Actualiza notificación cada 5 segundos

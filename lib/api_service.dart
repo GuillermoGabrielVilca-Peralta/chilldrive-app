@@ -149,20 +149,25 @@ class ApiService {
 
   // ─── Recorrido GPS (almacenado en dispositivo, no en servidor) ────────────
 
-  /// Guarda los waypoints GPS del viaje como "lat,lon;lat,lon;..."
+  /// Guarda los waypoints GPS del viaje como "lat,lon,speed;lat,lon,speed;..."
   Future<void> guardarRecorrido(int viajeId, List<List<double>> coords) async {
     if (coords.isEmpty) return;
-    final valor = coords.map((c) => '${c[0]},${c[1]}').join(';');
+    final valor = coords.map((c) => c.join(',')).join(';');
     await _storage.write(key: 'recorrido_$viajeId', value: valor);
   }
 
-  /// Lee los waypoints del viaje. Devuelve lista vacía si no hay datos.
+  /// Lee los waypoints del viaje → [lat, lon, speed_kmh]. Lista vacía si no hay datos.
+  /// Compatible con datos viejos (solo lat,lon) — speed queda en 0.
   Future<List<List<double>>> getRecorrido(int viajeId) async {
     final stored = await _storage.read(key: 'recorrido_$viajeId');
     if (stored == null || stored.isEmpty) return [];
     return stored.split(';').map((s) {
       final p = s.split(',');
-      return [double.parse(p[0]), double.parse(p[1])];
+      return [
+        double.parse(p[0]),
+        double.parse(p[1]),
+        p.length > 2 ? double.parse(p[2]) : 0.0,
+      ];
     }).toList();
   }
 
