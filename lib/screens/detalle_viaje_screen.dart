@@ -30,7 +30,7 @@ class _DetalleViajeScreenState extends State<DetalleViajeScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     _cargar();
   }
 
@@ -77,7 +77,11 @@ class _DetalleViajeScreenState extends State<DetalleViajeScreen>
         title: Text('Viaje #${widget.viajeId}'),
         bottom: TabBar(
           controller: _tabController,
-          tabs: const [Tab(text: 'General'), Tab(text: 'Mapa')],
+          tabs: const [
+            Tab(text: 'General'),
+            Tab(text: 'Calificación'),
+            Tab(text: 'Mapa'),
+          ],
         ),
       ),
       backgroundColor: cs.surfaceContainerLowest,
@@ -89,6 +93,7 @@ class _DetalleViajeScreenState extends State<DetalleViajeScreen>
                   controller: _tabController,
                   children: [
                     _tabGeneral(cs),
+                    _tabCalificacion(cs),
                     _tabMapa(cs),
                   ],
                 ),
@@ -118,7 +123,189 @@ class _DetalleViajeScreenState extends State<DetalleViajeScreen>
         ),
       );
 
-  // ── Tab 2: Mapa ───────────────────────────────────────────────────────────
+  // ── Tab 2: Calificación ───────────────────────────────────────────────────
+  // Score por categoría de ESTE viaje, calculado en el cliente desde los eventos
+  // ya cargados (funciona offline). Misma fórmula que el backend usa para el
+  // histórico global: score = max(0, 100 + suma de impactos negativos de la
+  // categoría). El general es el promedio de las categorías.
+
+  static const _categorias = <({String nombre, String tipo, IconData icon})>[
+    (nombre: 'Velocidad',   tipo: 'Exceso Velocidad',   icon: Icons.speed),
+    (nombre: 'Frenado',     tipo: 'Frenado Brusco',     icon: Icons.emergency),
+    (nombre: 'Aceleración', tipo: 'Aceleración Brusca', icon: Icons.keyboard_double_arrow_up),
+    (nombre: 'Giros',       tipo: 'Giro Brusco',        icon: Icons.turn_right),
+    (nombre: 'Celular',     tipo: 'Uso Celular',        icon: Icons.smartphone),
+  ];
+
+  ({int score, int cantidad}) _calcularCategoria(String tipo) {
+    final delTipo = _eventos.where((e) => e['tipoEvento'] == tipo);
+    final suma = delTipo.fold<int>(
+        0, (s, e) => s + ((e['impactoPuntaje'] as int?) ?? 0));
+    final score = (100 + suma).clamp(0, 100).toInt(); // suma es ≤ 0 (infracciones)
+    return (score: score, cantidad: delTipo.length);
+  }
+
+  Widget _tabCalificacion(ColorScheme cs) {
+    final filas = _categorias
+        .map((c) => (cat: c, res: _calcularCategoria(c.tipo)))
+        .toList();
+    final general = filas.isEmpty
+        ? 100
+        : (filas.fold<int>(0, (s, f) => s + f.res.score) / filas.length).round();
+    final totalInfracciones =
+        filas.fold<int>(0, (s, f) => s + f.res.cantidad);
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
+      children: [
+        _anilloScore(general, totalInfracciones, cs),
+        const SizedBox(height: 24),
+        Text('Por categoría',
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 12),
+        ...filas.map((f) => _filaCategoria(f.cat, f.res, cs)),
+        const SizedBox(height: 16),
+        Text(
+          'Calculado a partir de los ${_eventos.length} eventos de este viaje. '
+          '100 = sin infracciones en esa categoría.',
+          style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+        ),
+      ],
+    );
+  }
+
+  Widget _anilloScore(int score, int infracciones, ColorScheme cs) {
+    final color = _colorScore(score);
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 24),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: cs.outlineVariant),
+      ),
+      child: Column(
+        children: [
+          SizedBox(
+            width: 120,
+            height: 120,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                SizedBox(
+                  width: 120,
+                  height: 120,
+                  child: CircularProgressIndicator(
+                    value: score / 100,
+                    strokeWidth: 10,
+                    backgroundColor: cs.surfaceContainerHighest,
+                    valueColor: AlwaysStoppedAnimation(color),
+                  ),
+                ),
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('$score',
+                        style: TextStyle(
+                            fontSize: 34,
+                            fontWeight: FontWeight.bold,
+                            color: color)),
+                    Text('/100',
+                        style:
+                            TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(_etiquetaScore(score),
+              style: TextStyle(
+                  fontSize: 16, fontWeight: FontWeight.bold, color: color)),
+          const SizedBox(height: 4),
+          Text(
+            infracciones == 0
+                ? 'Sin infracciones detectadas'
+                : '$infracciones infracción${infracciones == 1 ? '' : 'es'} en total',
+            style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _filaCategoria(
+      ({String nombre, String tipo, IconData icon}) cat,
+      ({int score, int cantidad}) res,
+      ColorScheme cs) {
+    final color = _colorScore(res.score);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: cs.outlineVariant),
+      ),
+      child: Row(
+        children: [
+          Icon(cat.icon, size: 22, color: color),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(cat.nombre,
+                        style: const TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w600)),
+                    Text('${res.score}',
+                        style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: color)),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: res.score / 100,
+                    minHeight: 6,
+                    backgroundColor: cs.surfaceContainerHighest,
+                    valueColor: AlwaysStoppedAnimation(color),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  res.cantidad == 0
+                      ? 'Sin eventos'
+                      : '${res.cantidad} evento${res.cantidad == 1 ? '' : 's'}',
+                  style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _colorScore(int score) {
+    if (score >= 80) return Colors.green.shade600;
+    if (score >= 50) return Colors.orange.shade600;
+    return Colors.red.shade500;
+  }
+
+  String _etiquetaScore(int score) {
+    if (score >= 85) return 'Excelente';
+    if (score >= 70) return 'Buena';
+    if (score >= 50) return 'Regular';
+    return 'Riesgosa';
+  }
+
+  // ── Tab 3: Mapa ───────────────────────────────────────────────────────────
 
   Widget _tabMapa(ColorScheme cs) {
     // Eventos con coordenadas válidas
