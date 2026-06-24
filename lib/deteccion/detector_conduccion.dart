@@ -98,10 +98,23 @@ class DetectorConduccion {
     final primero = _historial.first;
     if (ahora.difference(primero.t) < _ventanaMinima) return;
 
-    final magnitud = sqrt(e.x * e.x + e.y * e.y + e.z * e.z);
+    // ── Giro brusco (cambio de rumbo GPS) ───────────────────────────────────
+    // Independiente del acelerómetro: solo depende de velocidad y rumbo del GPS,
+    // por eso se evalúa ANTES del filtro de pico longitudinal. Un giro a velocidad
+    // constante no genera pico de frenado/aceleración pero sí cambio de rumbo.
+    if (vel >= _velMinimaGiro &&
+        ahora.difference(_ultimoGiro) >= _cooldown) {
+      final deltaRumbo = _diffAngular(primero.rumbo, rumbo);
+      if (deltaRumbo >= _deltaRumboMin) {
+        _ultimoGiro = ahora;
+        onGiroBrusco();
+      }
+    }
 
-    // Contar muestras consecutivas sobre el umbral; resetear si cae.
-    // Así un bache (pico de 1 muestra ~50 ms) no activa nada.
+    // ── Filtro de pico longitudinal (solo frenado / aceleración) ────────────
+    // Cuenta muestras consecutivas sobre el umbral; un bache (pico de 1 muestra
+    // ~50 ms) no alcanza el mínimo y se descarta.
+    final magnitud = sqrt(e.x * e.x + e.y * e.y + e.z * e.z);
     if (magnitud >= _umbralAcel) {
       _muestrasEnPico++;
     } else {
@@ -125,19 +138,6 @@ class DetectorConduccion {
       if (deltaVel >= _deltaVelMin) {
         _ultimoAceleracion = ahora;
         onAceleracionBrusca();
-        return;
-      }
-    }
-
-    // ── Giro brusco (cambio de rumbo GPS) ───────────────────────────────────
-    // Usa el GPS en lugar del acelerómetro para no depender de la orientación
-    // del teléfono; no requiere pico de acelerómetro.
-    if (vel >= _velMinimaGiro &&
-        ahora.difference(_ultimoGiro) >= _cooldown) {
-      final deltaRumbo = _diffAngular(primero.rumbo, rumbo);
-      if (deltaRumbo >= _deltaRumboMin) {
-        _ultimoGiro = ahora;
-        onGiroBrusco();
       }
     }
   }
