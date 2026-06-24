@@ -9,6 +9,7 @@ import 'package:ultralytics_yolo/ultralytics_yolo.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../api_service.dart';
 import '../background_service.dart' show startCallback;
+import '../deteccion/detector_conduccion.dart';
 
 
 /// Pantalla de detección durante un viaje ACTIVO (recibe el viajeId + camaraId del home).
@@ -85,6 +86,16 @@ class _DeteccionScreenState extends State<DeteccionScreen>
   static const Duration _cooldownDur = Duration(seconds: 6);
 
   StreamSubscription<Position>? _gpsSub;
+  Position? _ultimaPos;
+
+  // Detector de maniobras bruscas (acelerómetro + GPS).
+  late final DetectorConduccion _detector = DetectorConduccion(
+    velocidadKmh:       () => _velActual,
+    headingDeg:         () => _ultimaPos?.heading ?? 0.0,
+    onFrenadoBrusco:    _onFrenadoBrusco,
+    onAceleracionBrusca: _onAceleracionBrusca,
+    onGiroBrusco:       _onGiroBrusco,
+  );
 
   @override
   void initState() {
@@ -212,6 +223,7 @@ class _DeteccionScreenState extends State<DeteccionScreen>
     if (!cam.isGranted) return;
     await _initTts();
     await _iniciarGps();
+    _detector.iniciar();
     await _refrescarPuntos();
     await _iniciarServicioBackground();
   }
@@ -239,6 +251,7 @@ class _DeteccionScreenState extends State<DeteccionScreen>
           distanceFilter: 0,
         ),
       ).listen((pos) {
+        _ultimaPos = pos;
         final kmh = (pos.speed.isNaN ? 0.0 : pos.speed) * 3.6;
         if (mounted) setState(() => _kmh = kmh < 0 ? 0 : kmh);
       });
@@ -458,9 +471,36 @@ class _DeteccionScreenState extends State<DeteccionScreen>
     _enviarEvento(tipo);
   }
 
+  /// Frenado brusco confirmado por el detector (acelerómetro + GPS).
+  void _onFrenadoBrusco() {
+    if (!mounted) return;
+    _hablarAlerta('Frenado brusco. Conduce con suavidad.', 'frenado_brusco');
+    _enviarEvento('Frenado Brusco');
+  }
+
+  /// Aceleración brusca confirmada por el detector.
+  void _onAceleracionBrusca() {
+    if (!mounted) return;
+    _hablarAlerta('Aceleración brusca. Acelera con suavidad.', 'acel_brusca');
+    _enviarEvento('Aceleración Brusca');
+  }
+
+  /// Giro brusco confirmado por cambio rápido de rumbo GPS.
+  void _onGiroBrusco() {
+    if (!mounted) return;
+    _hablarAlerta('Giro brusco. Toma las curvas con cuidado.', 'giro_brusco');
+    _enviarEvento('Giro Brusco');
+  }
+
   Future<void> _enviarEvento(String tipo) async {
     try {
-      await _api.registrarEvento(widget.viajeId, widget.camaraId, tipo);
+      await _api.registrarEvento(
+        widget.viajeId,
+        widget.camaraId,
+        tipo,
+        latitud: _ultimaPos?.latitude,
+        longitud: _ultimaPos?.longitude,
+      );
       await _refrescarPuntos();
       if (mounted) {
         setState(() => _ultimoEvento = tipo);
@@ -569,6 +609,7 @@ class _DeteccionScreenState extends State<DeteccionScreen>
     _pipSub?.cancel();
     _timer?.cancel();
     _alertController.dispose();
+    _detector.detener();
     _gpsSub?.cancel();
     if (!_servicioActivo) {
       WakelockPlus.disable();
