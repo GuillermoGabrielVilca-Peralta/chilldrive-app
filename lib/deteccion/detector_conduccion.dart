@@ -44,8 +44,9 @@ class DetectorConduccion {
   /// Cambio de rumbo en la ventana para confirmar un giro brusco (grados).
   static const double _deltaRumboMin = 25;
 
-  /// Velocidad mínima para detectar giros (km/h) — evita falsos al maniobrar lento.
-  static const double _velMinimaGiro = 25;
+  /// Velocidad mínima para detectar giros (km/h).
+  /// 45 km/h descarta giros normales en ciudad (esquinas, rotondas a baja velocidad).
+  static const double _velMinimaGiro = 45;
 
   /// Ventana de historial que se conserva para medir la tendencia.
   static const Duration _ventana = Duration(seconds: 2);
@@ -59,8 +60,13 @@ class DetectorConduccion {
   /// Frecuencia de muestreo (20 Hz — suficiente y ahorra batería).
   static const Duration _muestreo = Duration(milliseconds: 50);
 
+  /// Muestras consecutivas por encima del umbral requeridas para confirmar un pico.
+  /// 3 muestras × 50 ms = 150 ms — filtra baches y vibraciones puntuales.
+  static const int _muestrasMinimas = 3;
+
   StreamSubscription<UserAccelerometerEvent>? _sub;
   final List<_Muestra> _historial = [];
+  int _muestrasEnPico = 0;
 
   DateTime _ultimoFrenado       = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _ultimoAceleracion   = DateTime.fromMillisecondsSinceEpoch(0);
@@ -75,6 +81,7 @@ class DetectorConduccion {
     _sub?.cancel();
     _sub = null;
     _historial.clear();
+    _muestrasEnPico = 0;
   }
 
   void _onAceleracion(UserAccelerometerEvent e) {
@@ -93,9 +100,17 @@ class DetectorConduccion {
 
     final magnitud = sqrt(e.x * e.x + e.y * e.y + e.z * e.z);
 
+    // Contar muestras consecutivas sobre el umbral; resetear si cae.
+    // Así un bache (pico de 1 muestra ~50 ms) no activa nada.
+    if (magnitud >= _umbralAcel) {
+      _muestrasEnPico++;
+    } else {
+      _muestrasEnPico = 0;
+    }
+    if (_muestrasEnPico < _muestrasMinimas) return;
+
     // ── Frenado brusco ──────────────────────────────────────────────────────
-    if (magnitud >= _umbralAcel &&
-        ahora.difference(_ultimoFrenado) >= _cooldown) {
+    if (ahora.difference(_ultimoFrenado) >= _cooldown) {
       final deltaVel = primero.v - vel; // positivo = velocidad cayó
       if (deltaVel >= _deltaVelMin) {
         _ultimoFrenado = ahora;
@@ -105,8 +120,7 @@ class DetectorConduccion {
     }
 
     // ── Aceleración brusca ──────────────────────────────────────────────────
-    if (magnitud >= _umbralAcel &&
-        ahora.difference(_ultimoAceleracion) >= _cooldown) {
+    if (ahora.difference(_ultimoAceleracion) >= _cooldown) {
       final deltaVel = vel - primero.v; // positivo = velocidad subió
       if (deltaVel >= _deltaVelMin) {
         _ultimoAceleracion = ahora;

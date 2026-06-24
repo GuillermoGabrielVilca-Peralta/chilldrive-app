@@ -259,9 +259,10 @@ class _DeteccionScreenState extends State<DeteccionScreen>
         return;
       }
       _gpsSub = Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(
+        locationSettings: AndroidSettings(
           accuracy: LocationAccuracy.high,
           distanceFilter: 0,
+          intervalDuration: const Duration(milliseconds: 500),
         ),
       ).listen((pos) {
         _ultimaPos = pos;
