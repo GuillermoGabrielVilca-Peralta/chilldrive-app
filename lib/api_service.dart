@@ -95,6 +95,13 @@ class ApiService {
     return res.data as List;
   }
 
+  // ─── Estadísticas de conducción por categoría ─────────────────────────────
+
+  Future<Map<String, dynamic>> getEstadisticasConduccion(int usuarioId) async {
+    final res = await _dio.get('/api/evento/usuario/$usuarioId/estadisticas');
+    return res.data as Map<String, dynamic>;
+  }
+
   // ─── Puntos ──────────────────────────────────────────────────────────────
 
   Future<Map<String, dynamic>?> getPuntos(int usuarioId) async {
@@ -191,11 +198,19 @@ class ApiService {
 
   // ─── Eventos ─────────────────────────────────────────────────────────────
 
-  Future<void> registrarEvento(int viajeId, int camaraId, String tipoEvento) async {
+  Future<void> registrarEvento(
+    int viajeId,
+    int camaraId,
+    String tipoEvento, {
+    double? latitud,
+    double? longitud,
+  }) async {
     await _dio.post('/api/evento', data: {
       'viajeId': viajeId,
       'camaraId': camaraId,
       'tipoEvento': tipoEvento,
+      'latitud': ?latitud,
+      'longitud': ?longitud,
     });
   }
 
