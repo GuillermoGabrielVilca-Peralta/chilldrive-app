@@ -27,7 +27,7 @@ class DeteccionScreen extends StatefulWidget {
 }
 
 class _DeteccionScreenState extends State<DeteccionScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final ApiService _api = ApiService();
 
   static const _pipControl = MethodChannel('chilldrive/pip');
@@ -43,6 +43,7 @@ class _DeteccionScreenState extends State<DeteccionScreen>
 
   int _segundos = 0;
   Timer? _timer;
+  Timer? _timerUsoCelular;
   bool _servicioActivo = false;
   int _segundosUltimaNotif = -30; // fuerza primera actualización
 
@@ -107,6 +108,7 @@ class _DeteccionScreenState extends State<DeteccionScreen>
     _alertOpacity = Tween<double>(begin: 0.45, end: 0.0).animate(
       CurvedAnimation(parent: _alertController, curve: Curves.easeOut),
     );
+    WidgetsBinding.instance.addObserver(this);
     FlutterForegroundTask.addTaskDataCallback(_onMensajeTarea);
     _pipSub = _pipStatusChannel.receiveBroadcastStream().listen((inPip) {
       if (mounted) setState(() => _enPip = inPip as bool);
@@ -492,6 +494,24 @@ class _DeteccionScreenState extends State<DeteccionScreen>
     _enviarEvento('Giro Brusco');
   }
 
+  // ── Detección de uso del celular ─────────────────────────────────────────
+
+  /// Detecta que el usuario salió a otra app mientras el viaje está activo.
+  /// Se ignora el modo PiP (eso NO es usar el celular, es la detección en segundo plano).
+  /// Espera 2 s antes de registrar para descartar notificaciones accidentales.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused && _servicioActivo && !_enPip) {
+      _timerUsoCelular = Timer(const Duration(seconds: 2), () {
+        _hablarAlerta('Evita usar el celular mientras conduces.', 'uso_celular');
+        _enviarEvento('Uso Celular');
+      });
+    } else if (state == AppLifecycleState.resumed) {
+      // Cancelar si volvió antes de los 2 s (fue solo un vistazo).
+      _timerUsoCelular?.cancel();
+    }
+  }
+
   Future<void> _enviarEvento(String tipo) async {
     try {
       await _api.registrarEvento(
@@ -604,10 +624,12 @@ class _DeteccionScreenState extends State<DeteccionScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _tts.stop();
     FlutterForegroundTask.removeTaskDataCallback(_onMensajeTarea);
     _pipSub?.cancel();
     _timer?.cancel();
+    _timerUsoCelular?.cancel();
     _alertController.dispose();
     _detector.detener();
     _gpsSub?.cancel();
