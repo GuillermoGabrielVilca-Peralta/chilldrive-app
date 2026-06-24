@@ -88,6 +88,8 @@ class _DeteccionScreenState extends State<DeteccionScreen>
 
   StreamSubscription<Position>? _gpsSub;
   Position? _ultimaPos;
+  final List<List<double>> _recorrido = [];
+  int _segundosUltimoWaypoint = 0;
 
   // Detector de maniobras bruscas (acelerómetro + GPS).
   late final DetectorConduccion _detector = DetectorConduccion(
@@ -117,6 +119,13 @@ class _DeteccionScreenState extends State<DeteccionScreen>
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       setState(() => _segundos++);
+      // Captura waypoint GPS cada 10 segundos para el mapa de ruta
+      if (_servicioActivo && (_segundos - _segundosUltimoWaypoint) >= 10) {
+        _segundosUltimoWaypoint = _segundos;
+        if (_ultimaPos != null) {
+          _recorrido.add([_ultimaPos!.latitude, _ultimaPos!.longitude]);
+        }
+      }
       // Actualiza notificación cada 5 segundos
       if (_servicioActivo && (_segundos - _segundosUltimaNotif) >= 5) {
         _segundosUltimaNotif = _segundos;
@@ -537,6 +546,7 @@ class _DeteccionScreenState extends State<DeteccionScreen>
   Future<void> _finalizarViaje() async {
     try {
       await _detenerServicioBackground();
+      await _api.guardarRecorrido(widget.viajeId, _recorrido);
       final mensaje = await _api.finalizarViaje(
         widget.viajeId,
         duracionMinutos: _duracionMinutos,

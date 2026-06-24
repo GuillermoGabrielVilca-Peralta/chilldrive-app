@@ -147,6 +147,25 @@ class ApiService {
 
   Future<void> clearViajeActual() => _storage.delete(key: 'viajeActualId');
 
+  // ─── Recorrido GPS (almacenado en dispositivo, no en servidor) ────────────
+
+  /// Guarda los waypoints GPS del viaje como "lat,lon;lat,lon;..."
+  Future<void> guardarRecorrido(int viajeId, List<List<double>> coords) async {
+    if (coords.isEmpty) return;
+    final valor = coords.map((c) => '${c[0]},${c[1]}').join(';');
+    await _storage.write(key: 'recorrido_$viajeId', value: valor);
+  }
+
+  /// Lee los waypoints del viaje. Devuelve lista vacía si no hay datos.
+  Future<List<List<double>>> getRecorrido(int viajeId) async {
+    final stored = await _storage.read(key: 'recorrido_$viajeId');
+    if (stored == null || stored.isEmpty) return [];
+    return stored.split(';').map((s) {
+      final p = s.split(',');
+      return [double.parse(p[0]), double.parse(p[1])];
+    }).toList();
+  }
+
   Future<int> getOrCreateViajeActual(int usuarioId, int vehiculoId) async {
     final existing = await getViajeActualId();
     if (existing != null) return existing;

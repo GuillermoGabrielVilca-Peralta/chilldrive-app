@@ -43,6 +43,9 @@ dependencies:
   flutter_foreground_task: ^8.14.0
   wakelock_plus: ^1.2.10
   flutter_tts: ^4.0.0
+  sensors_plus: ^7.0.0
+  flutter_map: ^8.3.0
+  latlong2: ^0.9.1
 
 dev_dependencies:
   flutter_test:
