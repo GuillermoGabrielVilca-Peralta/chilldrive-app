@@ -1,10 +1,13 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:uuid/uuid.dart';
 import 'config/app_config.dart';
+import 'data/outbox_db.dart';
 
 class ApiService {
   final Dio _dio;
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
+  final OutboxDb _outbox = OutboxDb.instance;
 
   ApiService()
       : _dio = Dio(BaseOptions(
@@ -222,6 +225,11 @@ class ApiService {
 
   // ─── Eventos ─────────────────────────────────────────────────────────────
 
+  /// Registra un evento de conducción. **Offline-first:** lo guarda PRIMERO en
+  /// la bandeja local (sobrevive sin señal) y recién intenta enviarlo. Si no hay
+  /// conexión, el evento queda pendiente y NO se lanza error — lo reenviará el
+  /// sincronizador (Fase B). Nunca lanza: un 4xx definitivo se descarta en
+  /// silencio (ver `_intentarEnviar`), el detector no debe romperse por esto.
   Future<void> registrarEvento(
     int viajeId,
     int camaraId,
@@ -229,13 +237,72 @@ class ApiService {
     double? latitud,
     double? longitud,
   }) async {
-    await _dio.post('/api/evento', data: {
-      'viajeId': viajeId,
-      'camaraId': camaraId,
-      'tipoEvento': tipoEvento,
-      'latitud': ?latitud,
-      'longitud': ?longitud,
-    });
+    final pendiente = EventoPendiente(
+      idLocal: const Uuid().v4(),
+      viajeId: viajeId,
+      camaraId: camaraId,
+      tipoEvento: tipoEvento,
+      latitud: latitud,
+      longitud: longitud,
+      timestamp: DateTime.now().toUtc().toIso8601String(),
+    );
+    await _outbox.insertar(pendiente);
+    await _intentarEnviar(pendiente);
+  }
+
+  /// Reintenta enviar todos los eventos pendientes en orden de detección (FIFO).
+  /// Se detiene en cuanto detecta que no hay conexión (no insiste en vano).
+  /// Devuelve cuántos quedan sin enviar (0 = todo sincronizado).
+  Future<int> sincronizarPendientes() async {
+    for (final e in await _outbox.pendientes()) {
+      final r = await _intentarEnviar(e);
+      if (r == _ResultadoEnvio.sinRed) break; // sin señal: no seguir intentando
+    }
+    return _outbox.contarPendientes();
+  }
+
+  /// Cantidad de eventos aún sin sincronizar (para diagnóstico / UI).
+  Future<int> eventosPendientes() => _outbox.contarPendientes();
+
+  /// Códigos 4xx que NO son culpa del evento, sino transitorios: token vencido
+  /// (401/403), timeout (408) o rate limit (429). Hay que mantener el evento
+  /// pendiente y reintentar (p. ej. tras renovar el token), nunca descartarlo
+  /// — perderíamos datos reales de un viaje sin señal.
+  static const _reintentables = {401, 403, 408, 429};
+
+  /// Intenta enviar un evento ya persistido en la bandeja local.
+  /// - Éxito → lo borra de la cola (`enviado`).
+  /// - Sin señal / servidor 5xx / 4xx transitorio (token, timeout, rate
+  ///   limit) → lo deja pendiente (`sinRed`) para reintentar.
+  /// - 4xx definitivo (el evento en sí está mal: 400/404/409/422) → lo
+  ///   descarta, un reintento no ayudaría (`descartado`).
+  Future<_ResultadoEnvio> _intentarEnviar(EventoPendiente e) async {
+    try {
+      await _dio.post('/api/evento', data: {
+        'idLocal': e.idLocal,
+        'viajeId': e.viajeId,
+        'camaraId': e.camaraId,
+        'tipoEvento': e.tipoEvento,
+        // Hora real de detección (ISO-8601 UTC): el backend la usa como fecha del
+        // evento y para la defensa anti-flood, así la cola offline conserva el orden.
+        'fechaDeteccion': e.timestamp,
+        'latitud': ?e.latitud,
+        'longitud': ?e.longitud,
+      });
+      await _outbox.marcarEnviado(e.idLocal);
+      return _ResultadoEnvio.enviado;
+    } on DioException catch (ex) {
+      final status = ex.response?.statusCode;
+      final reintentar = ex.response == null ||
+          (status != null && (status >= 500 || _reintentables.contains(status))) ||
+          ex.type == DioExceptionType.connectionError ||
+          ex.type == DioExceptionType.connectionTimeout ||
+          ex.type == DioExceptionType.sendTimeout ||
+          ex.type == DioExceptionType.receiveTimeout;
+      if (reintentar) return _ResultadoEnvio.sinRed;
+      await _outbox.marcarEnviado(e.idLocal);
+      return _ResultadoEnvio.descartado;
+    }
   }
 
   Future<List<dynamic>> getEventosViaje(int viajeId) async {
@@ -275,6 +342,9 @@ class ApiService {
     return res.data['mensaje'] as String;
   }
 }
+
+/// Resultado de intentar enviar un evento de la bandeja local al backend.
+enum _ResultadoEnvio { enviado, sinRed, descartado }
 
 // ─── Helper global ───────────────────────────────────────────────────────────
 

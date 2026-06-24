@@ -46,6 +46,9 @@ dependencies:
   sensors_plus: ^7.0.0
   flutter_map: ^8.3.0
   latlong2: ^0.9.1
+  sqflite: ^2.4.1        # bandeja local (outbox) de eventos para modo offline
+  uuid: ^4.5.1           # id único por evento (idempotencia / no duplicar)
+  connectivity_plus: ^6.1.0  # detectar recuperación de señal para sincronizar
 
 dev_dependencies:
   flutter_test:

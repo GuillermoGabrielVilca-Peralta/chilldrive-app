@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../api_service.dart';
+import '../data/sync_service.dart';
 import 'dashboard_screen.dart';
 import 'viaje_tab.dart';
 import 'premios_screen.dart';
@@ -13,6 +15,22 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _tabIndex = 0;
+
+  // Reenvía a backend los eventos que quedaron en la cola local (modo offline).
+  // Activo durante toda la sesión: vacía la cola al recuperar señal.
+  final SyncService _sync = SyncService(ApiService());
+
+  @override
+  void initState() {
+    super.initState();
+    _sync.iniciar();
+  }
+
+  @override
+  void dispose() {
+    _sync.detener();
+    super.dispose();
+  }
 
   void _switchTab(int index) => setState(() => _tabIndex = index);
 
