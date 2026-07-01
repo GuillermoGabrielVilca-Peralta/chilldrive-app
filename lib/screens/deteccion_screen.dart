@@ -9,6 +9,7 @@ import 'package:ultralytics_yolo/ultralytics_yolo.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../api_service.dart';
 import '../background_service.dart' show startCallback;
+import '../deteccion/clasificador_eventos.dart';
 import '../deteccion/detector_conduccion.dart';
 import '../utils/geo.dart';
 
@@ -284,47 +285,21 @@ class _DeteccionScreenState extends State<DeteccionScreen>
     } catch (_) {}
   }
 
-  // ── Lógica de eventos por modo ──────────────────────────────────────────────
-
-  /// Modo señales: clase YOLO → TipoEvento del backend (o null si no aplica).
-  String? _senalAEvento(String clase, double kmh) {
-    if (clase == 'Green Light') return 'Señal Respetada';
-    if (clase == 'Red Light') {
-      return kmh > 5 ? 'Señal Ignorada' : 'Señal Respetada';
-    }
-    if (clase.startsWith('Speed Limit')) {
-      final limite = int.tryParse(clase.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
-      if (limite > 0 && kmh > limite) return 'Exceso Velocidad';
-      return null;
-    }
-    return null;
-  }
-
-  /// Modo personas (COCO): solo reacciona a peatones.
-  String? _personaAEvento(String clase) {
-    if (clase == 'person') return 'Peatón Detectado';
-    return null;
-  }
-
-  bool _esPositivo(String tipo) =>
-      tipo == 'Señal Respetada' ||
-      tipo == 'Carril Mantenido' ||
-      tipo == 'Distancia Segura';
-
-  bool _esNeutro(String tipo) => tipo == 'Peatón Detectado';
+  // ── Alertas visuales/hápticas por evento ────────────────────────────────────
+  // (Las reglas de clasificación viven en ClasificadorEventos, no aquí.)
 
   Color _colorDeEvento(String tipo) {
-    if (_esPositivo(tipo)) return Colors.green;
-    if (_esNeutro(tipo)) return Colors.orange;
+    if (ClasificadorEventos.esPositivo(tipo)) return Colors.green;
+    if (ClasificadorEventos.esNeutro(tipo)) return Colors.orange;
     return Colors.red;
   }
 
   void _dispararAlerta(String tipo) {
     setState(() => _alertColor = _colorDeEvento(tipo));
     _alertController.forward(from: 0.0);
-    if (_esPositivo(tipo)) {
+    if (ClasificadorEventos.esPositivo(tipo)) {
       HapticFeedback.lightImpact();
-    } else if (_esNeutro(tipo)) {
+    } else if (ClasificadorEventos.esNeutro(tipo)) {
       HapticFeedback.mediumImpact();
     } else {
       HapticFeedback.heavyImpact();
@@ -366,52 +341,7 @@ class _DeteccionScreenState extends State<DeteccionScreen>
       return;
     }
 
-    // Personas: manejado por _mensajeRiesgoPeatonal / _procesarDetecciones
-  }
-
-  // ── Riesgo peatonal inteligente ───────────────────────────────────────────
-
-  /// Evalúa si hay riesgo real de atropello según posición + tamaño del
-  /// bounding box normalizado (0–1) y velocidad actual.
-  /// Retorna el mensaje a hablar, o null si no hay riesgo.
-  String? _mensajeRiesgoPeatonal(List<YOLOResult> personas, double kmh) {
-    if (personas.isEmpty || kmh < 2) return null;
-
-    // Muchas personas en campo: zona escolar / mercado → siempre avisar
-    if (personas.length >= 3) {
-      return kmh > 20
-          ? 'Zona muy transitada. Reduce la velocidad'
-          : null; // a velocidad muy baja no hace falta
-    }
-
-    int puntos = 0;
-    for (final p in personas) {
-      final box = p.normalizedBox;
-      final centerX = (box.left + box.right) / 2;
-      final altura  = box.height; // bottom - top (0–1)
-
-      final centrado    = centerX >= 0.20 && centerX <= 0.80;
-      final cercano     = altura > 0.28;
-      final muyCercano  = altura > 0.48;
-
-      if (muyCercano && centrado) { puntos += 4; }
-      else if (cercano && centrado) { puntos += 2; }
-      else if (centrado) { puntos += 1; }
-      // Persona en el borde (vereda): 0 puntos → sin alerta
-    }
-
-    if (puntos == 0) return null;
-
-    if (kmh > 35 && puntos >= 2) {
-      return '¡Atención! Persona en la vía. Frena ahora';
-    }
-    if (puntos >= 4) {
-      return 'Persona muy cerca en la vía. Reduce la velocidad';
-    }
-    if (puntos >= 2) {
-      return 'Precaución, persona detectada en la vía';
-    }
-    return null;
+    // Personas: manejado por ClasificadorEventos.mensajeRiesgoPeatonal / _procesarDetecciones
   }
 
   // ── Detección YOLO ────────────────────────────────────────────────────────
@@ -430,7 +360,7 @@ class _DeteccionScreenState extends State<DeteccionScreen>
       final personas = validos.where((r) => r.className == 'person').toList();
 
       // Evaluación de riesgo por posición/tamaño (3 frames de confirmación)
-      final mensaje = _mensajeRiesgoPeatonal(personas, _velActual);
+      final mensaje = ClasificadorEventos.mensajeRiesgoPeatonal(personas, _velActual);
       if (mensaje != null) {
         _conteoRiesgoPeatonal++;
         if (_conteoRiesgoPeatonal >= _framesRiesgoPeatonal) {
@@ -474,8 +404,8 @@ class _DeteccionScreenState extends State<DeteccionScreen>
     _alertaAudio(clase);
 
     final tipo = _modoPersonas
-        ? _personaAEvento(clase)
-        : _senalAEvento(clase, _velActual);
+        ? ClasificadorEventos.personaAEvento(clase)
+        : ClasificadorEventos.senalAEvento(clase, _velActual);
     if (tipo == null) return;
 
     final ahora = DateTime.now();
