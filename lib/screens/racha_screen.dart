@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../api_service.dart';
+import '../utils/racha.dart';
 
 class RachaScreen extends StatefulWidget {
   const RachaScreen({super.key});
@@ -35,41 +36,20 @@ class _RachaScreenState extends State<RachaScreen> {
       final uid   = await _api.getUsuarioId();
       final viajes = await _api.getViajesUsuario(uid);
 
-      // Días únicos con viaje finalizado → calcular racha consecutiva
+      // Días únicos (en hora Perú) con viaje FINALIZADO → racha consecutiva.
       final dias = <DateTime>{};
       for (final v in viajes) {
         if (v['estado'] != 'Finalizado') continue;
-        final fecha = DateTime.tryParse(v['fechaInicio'] as String? ?? '');
-        if (fecha != null) {
-          dias.add(DateTime(fecha.year, fecha.month, fecha.day));
-        }
+        final dia = diaPeruDeIso(v['fechaInicio'] as String?);
+        if (dia != null) dias.add(dia);
       }
 
-      final racha = _calcularRacha(dias);
+      final racha = calcularRacha(dias, hoyEnPeru());
       if (mounted) setState(() => _rachaActual = racha);
     } catch (_) {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
-  }
-
-  int _calcularRacha(Set<DateTime> dias) {
-    if (dias.isEmpty) return 0;
-    final hoy       = DateTime.now();
-    final hoyClean  = DateTime(hoy.year, hoy.month, hoy.day);
-    int racha       = 0;
-    var diaCheck    = hoyClean;
-
-    // Acepta hoy O ayer como punto de partida (no penaliza si aún no condujo hoy)
-    if (!dias.contains(diaCheck)) {
-      diaCheck = diaCheck.subtract(const Duration(days: 1));
-    }
-
-    while (dias.contains(diaCheck)) {
-      racha++;
-      diaCheck = diaCheck.subtract(const Duration(days: 1));
-    }
-    return racha;
   }
 
   @override
