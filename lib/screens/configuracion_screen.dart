@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../api_service.dart';
 import '../config/app_config.dart';
 import '../widgets/dialogo_conexion.dart';
@@ -12,9 +11,7 @@ class ConfiguracionScreen extends StatefulWidget {
 }
 
 class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
-  static const _storage = FlutterSecureStorage();
-  static const _keyNotif = 'notificaciones_activas';
-  static const _version  = '1.0.0';
+  static const _version = '1.0.0';
 
   final _api = ApiService();
 
@@ -29,10 +26,10 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
   }
 
   Future<void> _cargarPreferencias() async {
-    final val = await _storage.read(key: _keyNotif);
+    final activas = await _api.getNotificacionesActivas();
     if (mounted) {
       setState(() {
-        _notificaciones = val != 'false'; // true por defecto
+        _notificaciones = activas;
         _cargando = false;
       });
     }
@@ -40,7 +37,7 @@ class _ConfiguracionScreenState extends State<ConfiguracionScreen> {
 
   Future<void> _toggleNotificaciones(bool valor) async {
     setState(() => _notificaciones = valor);
-    await _storage.write(key: _keyNotif, value: valor.toString());
+    await _api.setNotificacionesActivas(valor);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

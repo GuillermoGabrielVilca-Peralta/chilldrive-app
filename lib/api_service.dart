@@ -137,6 +137,15 @@ class ApiService {
   Future<void> setTipoConductor(String valor) =>
       _storage.write(key: 'tipoConductor', value: valor);
 
+  // ─── Preferencias locales ──────────────────────────────────────────────────
+  // La UI nunca toca el almacenamiento directo; pasa por acá (capa de datos).
+
+  Future<bool> getNotificacionesActivas() async =>
+      (await _storage.read(key: 'notificaciones_activas')) != 'false'; // true por defecto
+
+  Future<void> setNotificacionesActivas(bool valor) =>
+      _storage.write(key: 'notificaciones_activas', value: valor.toString());
+
   Future<dynamic> put(String path, Map<String, dynamic> data) async {
     final res = await _dio.put('/api$path', data: data);
     return res.data;
