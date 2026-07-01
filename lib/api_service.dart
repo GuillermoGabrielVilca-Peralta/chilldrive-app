@@ -23,7 +23,55 @@ class ApiService {
         }
         handler.next(options);
       },
+      onError: (e, handler) async {
+        // Auto-renovación: si el access token expiró (401), intenta refrescarlo una
+        // sola vez con el refresh token y reintenta la request original. Así el
+        // usuario no tiene que volver a iniciar sesión cada día.
+        final req = e.requestOptions;
+        final es401         = e.response?.statusCode == 401;
+        final esAuth        = req.path.contains('/api/auth/'); // login/refresh: no reintentar
+        final yaReintentado = req.extra['reintentado'] == true;
+
+        if (es401 && !esAuth && !yaReintentado && await _refrescarToken()) {
+          final nuevoToken = await _storage.read(key: 'token');
+          req.extra['reintentado'] = true;
+          req.headers['Authorization'] = 'Bearer $nuevoToken';
+          try {
+            return handler.resolve(await _dio.fetch(req));
+          } on DioException catch (err) {
+            return handler.next(err);
+          }
+        }
+        handler.next(e);
+      },
     ));
+  }
+
+  /// Refresh en curso (si lo hay). Coalesce varias 401 simultáneas en una sola
+  /// renovación para no disparar N llamadas a /refresh a la vez.
+  Future<bool>? _refrescando;
+
+  Future<bool> _refrescarToken() =>
+      _refrescando ??= _hacerRefresh().whenComplete(() => _refrescando = null);
+
+  /// Pide un nuevo par de tokens usando el refresh token guardado. Usa un cliente
+  /// Dio limpio para evitar recursión de interceptores y no mandar el token vencido.
+  Future<bool> _hacerRefresh() async {
+    final refresh = await _storage.read(key: 'refreshToken');
+    if (refresh == null || refresh.isEmpty) return false;
+    try {
+      final res = await Dio(BaseOptions(baseUrl: _dio.options.baseUrl))
+          .post('/api/auth/refresh', data: {'refreshToken': refresh});
+      final data = res.data as Map<String, dynamic>;
+      await _storage.write(key: 'token', value: data['token'] as String);
+      final nuevoRefresh = data['refreshToken'] as String?;
+      if (nuevoRefresh != null && nuevoRefresh.isNotEmpty) {
+        await _storage.write(key: 'refreshToken', value: nuevoRefresh);
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   // ─── Sesión ──────────────────────────────────────────────────────────────
@@ -35,12 +83,42 @@ class ApiService {
     });
     final data = res.data as Map<String, dynamic>;
     await _storage.write(key: 'token', value: data['token'] as String);
+    await _storage.write(key: 'refreshToken', value: data['refreshToken'] as String? ?? '');
     await _storage.write(key: 'usuarioId', value: data['usuarioId'].toString());
     await _storage.write(key: 'nombreCompleto', value: data['nombreCompleto'] as String? ?? '');
     await _storage.write(key: 'tipoConductor', value: data['tipoConductor'] as String? ?? 'Particular');
   }
 
-  Future<void> logout() async => _storage.deleteAll();
+  Future<void> logout() async {
+    // deleteAll borra TODO el almacenamiento seguro, incluida la URL del backend
+    // que el usuario pudo configurar. La preservamos para no perder la red al salir.
+    final urlBackend = await _storage.read(key: AppConfig.storageKey);
+    await _storage.deleteAll();
+    if (urlBackend != null) {
+      await _storage.write(key: AppConfig.storageKey, value: urlBackend);
+    }
+  }
+
+  /// URL base actual del backend (para mostrarla en Configuración).
+  String get baseUrl => _dio.options.baseUrl;
+
+  /// Cambia la URL del backend en caliente: la persiste y la aplica a este
+  /// cliente sin reiniciar la app.
+  Future<void> setBaseUrl(String url) async {
+    await AppConfig.guardar(url);
+    _dio.options.baseUrl = AppConfig.apiBaseUrl;
+  }
+
+  /// Prueba la conexión contra el endpoint público /health del backend.
+  /// Devuelve true si responde 200. No lanza.
+  Future<bool> probarConexion() async {
+    try {
+      final res = await _dio.get('/health');
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
 
   Future<bool> get isLoggedIn async => (await _storage.read(key: 'token')) != null;
 
@@ -132,9 +210,15 @@ class ApiService {
     return res.data['id'] as int;
   }
 
-  Future<String> finalizarViaje(int viajeId, {required int duracionMinutos}) async {
+  Future<String> finalizarViaje(
+    int viajeId, {
+    required int duracionMinutos,
+    double distanciaKm = 0,
+  }) async {
     final res = await _dio.patch('/api/viaje/$viajeId/finalizar', data: {
-      'distanciaKm': 0,
+      // Distancia real calculada con haversine sobre los waypoints GPS del viaje
+      // (ver distanciaKmDeRecorrido); redondeada a 2 decimales.
+      'distanciaKm': double.parse(distanciaKm.toStringAsFixed(2)),
       'duracionMinutos': duracionMinutos,
       'puntajeConduccion': 100,
     });
@@ -148,7 +232,18 @@ class ApiService {
     return stored != null ? int.parse(stored) : null;
   }
 
-  Future<void> clearViajeActual() => _storage.delete(key: 'viajeActualId');
+  Future<void> clearViajeActual() async {
+    await _storage.delete(key: 'viajeActualId');
+    await _storage.delete(key: 'viajeActualFecha');
+  }
+
+  /// Fecha de hoy en hora de Perú (UTC-5) como 'YYYY-MM-DD'. Se usa para decidir si
+  /// el viaje cacheado es del día actual (se continúa) o de un día anterior (se pide
+  /// uno nuevo al backend, que cierra el viejo). Igual criterio que el backend.
+  String _fechaPeruHoy() {
+    final p = DateTime.now().toUtc().subtract(const Duration(hours: 5));
+    return '${p.year}-${p.month.toString().padLeft(2, '0')}-${p.day.toString().padLeft(2, '0')}';
+  }
 
   // ─── Recorrido GPS (almacenado en dispositivo, no en servidor) ────────────
 
@@ -175,10 +270,19 @@ class ApiService {
   }
 
   Future<int> getOrCreateViajeActual(int usuarioId, int vehiculoId) async {
+    final hoy = _fechaPeruHoy();
     final existing = await getViajeActualId();
-    if (existing != null) return existing;
+    final fechaGuardada = await _storage.read(key: 'viajeActualFecha');
+
+    // Continuar el viaje cacheado solo si es de HOY (hora Perú): así se puede pausar
+    // y seguir el mismo viaje durante el día, incluso sin señal.
+    if (existing != null && fechaGuardada == hoy) return existing;
+
+    // Día nuevo (o sin cache válido): el backend retoma el viaje de hoy si existe, o
+    // crea uno nuevo cerrando los de días anteriores. Requiere conexión.
     final id = await iniciarViaje(usuarioId, vehiculoId);
     await _storage.write(key: 'viajeActualId', value: id.toString());
+    await _storage.write(key: 'viajeActualFecha', value: hoy);
     return id;
   }
 

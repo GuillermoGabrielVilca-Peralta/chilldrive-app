@@ -494,6 +494,7 @@ class _DetalleViajeScreenState extends State<DetalleViajeScreen>
             0, (s, e) => s + ((e['impactoPuntaje'] as int?) ?? 0));
     final durMin = v['duracionMinutos'] as int?;
     final puntaje = v['puntajeConduccion'];
+    final distKm = (v['distanciaKm'] as num?)?.toDouble() ?? 0;
 
     return Container(
       padding: const EdgeInsets.all(18),
@@ -533,6 +534,11 @@ class _DetalleViajeScreenState extends State<DetalleViajeScreen>
                 puntaje != null
                     ? '${(puntaje as num).toStringAsFixed(0)}/100'
                     : '—',
+                cs.onSurface,
+              ),
+              _metrica(
+                'Distancia',
+                distKm > 0 ? '${distKm.toStringAsFixed(1)} km' : '—',
                 cs.onSurface,
               ),
               _metrica('Eventos', '${_eventos.length}', cs.onSurface),

@@ -10,6 +10,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import '../api_service.dart';
 import '../background_service.dart' show startCallback;
 import '../deteccion/detector_conduccion.dart';
+import '../utils/geo.dart';
 
 
 /// Pantalla de detección durante un viaje ACTIVO (recibe el viajeId + camaraId del home).
@@ -553,6 +554,7 @@ class _DeteccionScreenState extends State<DeteccionScreen>
       final mensaje = await _api.finalizarViaje(
         widget.viajeId,
         duracionMinutos: _duracionMinutos,
+        distanciaKm: distanciaKmDeRecorrido(_recorrido),
       );
       await _api.clearViajeActual();
       if (!mounted) return;

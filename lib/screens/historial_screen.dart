@@ -71,6 +71,7 @@ class _HistorialScreenState extends State<HistorialScreen> {
     final fechaStr = v['fechaInicio'] as String?;
     final fecha = fechaStr != null ? _fmtFecha(fechaStr) : '—';
     final durMin = v['duracionMinutos'] as int?;
+    final distKm = (v['distanciaKm'] as num?)?.toDouble() ?? 0;
 
     return InkWell(
       borderRadius: BorderRadius.circular(14),
@@ -109,7 +110,9 @@ class _HistorialScreenState extends State<HistorialScreen> {
                           fontWeight: FontWeight.w600, fontSize: 14)),
                   const SizedBox(height: 2),
                   Text(
-                    '$fecha${durMin != null ? ' · $durMin min' : ''}',
+                    '$fecha'
+                    '${durMin != null ? ' · $durMin min' : ''}'
+                    '${distKm > 0 ? ' · ${distKm.toStringAsFixed(1)} km' : ''}',
                     style: TextStyle(
                         fontSize: 12, color: cs.onSurfaceVariant),
                   ),

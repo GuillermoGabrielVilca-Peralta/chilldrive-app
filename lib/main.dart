@@ -1,9 +1,16 @@
 import 'package:flutter/material.dart';
 import 'api_service.dart';
+import 'config/app_config.dart';
 import 'screens/login_screen.dart';
 import 'screens/main_screen.dart';
 
-void main() => runApp(const ChillDriveApp());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Carga la URL del backend configurada por el usuario (si la cambió en
+  // Configuración) antes de construir cualquier ApiService.
+  await AppConfig.cargarOverride();
+  runApp(const ChillDriveApp());
+}
 
 class ChillDriveApp extends StatelessWidget {
   const ChillDriveApp({super.key});
