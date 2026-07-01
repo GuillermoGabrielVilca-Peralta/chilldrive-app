@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../api_service.dart';
+import '../utils/validaciones.dart';
 
 class RegistroScreen extends StatefulWidget {
   const RegistroScreen({super.key});
@@ -40,6 +41,10 @@ class _RegistroScreenState extends State<RegistroScreen> {
 
     if (nombres.isEmpty || apellidos.isEmpty || correo.isEmpty || password.isEmpty) {
       setState(() => _error = 'Completa todos los campos.');
+      return;
+    }
+    if (!esCorreoValido(correo)) {
+      setState(() => _error = 'Ingresa un correo electrónico válido.');
       return;
     }
     if (password.length < 8) {
