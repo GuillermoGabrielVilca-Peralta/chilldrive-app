@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../api_service.dart';
+import '../widgets/dialogo_conexion.dart';
 import 'main_screen.dart';
 import 'registro_screen.dart';
 
@@ -38,6 +39,13 @@ class _LoginScreenState extends State<LoginScreen> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  /// Permite configurar la IP del backend SIN estar logueado — necesario cuando
+  /// no se puede conectar para entrar (celular nuevo, cambio de WiFi).
+  Future<void> _configurarConexion() async {
+    await mostrarDialogoConexion(context, _api);
+    if (mounted) setState(() => _error = null);
   }
 
   @override
@@ -154,6 +162,12 @@ class _LoginScreenState extends State<LoginScreen> {
                                     strokeWidth: 2, color: Colors.white))
                             : const Text('Entrar',
                                 style: TextStyle(fontSize: 15)),
+                      ),
+                      const SizedBox(height: 4),
+                      TextButton.icon(
+                        onPressed: _loading ? null : _configurarConexion,
+                        icon: const Icon(Icons.dns_outlined, size: 18),
+                        label: const Text('Configurar servidor'),
                       ),
                     ],
                   ),
