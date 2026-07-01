@@ -15,6 +15,12 @@ class _PerfilScreenState extends State<PerfilScreen> {
   String _tipoConductor = '';
   bool _loading = true;
 
+  // Estadísticas de conducción (se cargan del backend; no bloquean el perfil).
+  int _puntos = 0;
+  int _historico = 0;
+  String _nivel = '—';
+  int _score = 100;
+
   @override
   void initState() {
     super.initState();
@@ -22,17 +28,45 @@ class _PerfilScreenState extends State<PerfilScreen> {
   }
 
   Future<void> _cargar() async {
-    setState(() => _loading = true);
+    if (mounted) setState(() => _loading = true);
     final nombre = await _api.getNombreCompleto();
     final tipo = await _api.getTipoConductor();
+
+    // Puntos + score del backend. Si no hay red, el perfil igual muestra nombre/tipo.
+    var puntos = 0, historico = 0, score = 100;
+    var nivel = '—';
+    try {
+      final uid = await _api.getUsuarioId();
+      final p = await _api.getPuntos(uid);
+      if (p != null) {
+        puntos = (p['puntosActuales'] as int?) ?? 0;
+        historico = (p['puntosHistoricos'] as int?) ?? 0;
+        nivel = (p['nivel'] as String?) ?? '—';
+      }
+      final e = await _api.getEstadisticasConduccion(uid);
+      score = (e['scoreGeneral'] as int?) ?? 100;
+    } catch (_) {
+      // Sin conexión: se mantienen los valores por defecto.
+    }
+
     if (mounted) {
       setState(() {
         _nombreCompleto = nombre;
         _tipoConductor = tipo;
+        _puntos = puntos;
+        _historico = historico;
+        _nivel = nivel;
+        _score = score;
         _loading = false;
       });
     }
   }
+
+  /// Formatea un entero con separador de miles (1250 → "1,250") sin depender de intl.
+  static String _fmt(int n) => n.toString().replaceAllMapped(
+        RegExp(r'(\d)(?=(\d{3})+$)'),
+        (m) => '${m[1]},',
+      );
 
   String get _iniciales {
     final partes = _nombreCompleto.trim().split(' ');
@@ -175,7 +209,9 @@ class _PerfilScreenState extends State<PerfilScreen> {
       backgroundColor: cs.surfaceContainerLowest,
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : ListView(
+          : RefreshIndicator(
+              onRefresh: _cargar,
+              child: ListView(
               padding: const EdgeInsets.all(24),
               children: [
                 // ── Avatar + nombre ──────────────────────────────────────
@@ -219,7 +255,41 @@ class _PerfilScreenState extends State<PerfilScreen> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 28),
+
+                // ── Estadísticas de conducción ───────────────────────────
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 20),
+                  decoration: BoxDecoration(
+                    color: cs.primary,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(child: _statMetrica('Puntos', _fmt(_puntos))),
+                          _statDivider(),
+                          Expanded(child: _statMetrica('Nivel', _nivel)),
+                          _statDivider(),
+                          Expanded(child: _statMetrica('Score', '$_score/100')),
+                        ],
+                      ),
+                      if (_historico > 0) ...[
+                        const SizedBox(height: 16),
+                        const Divider(color: Colors.white24, height: 1),
+                        const SizedBox(height: 12),
+                        Text(
+                          '${_fmt(_historico)} puntos ganados en total',
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 12),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 20),
 
                 // ── Info card ────────────────────────────────────────────
                 Container(
@@ -279,8 +349,28 @@ class _PerfilScreenState extends State<PerfilScreen> {
                 ),
               ],
             ),
+            ),
     );
   }
+
+  Widget _statMetrica(String label, String valor) => Column(
+        children: [
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(valor,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 19,
+                    fontWeight: FontWeight.bold)),
+          ),
+          const SizedBox(height: 4),
+          Text(label,
+              style: const TextStyle(color: Colors.white70, fontSize: 11)),
+        ],
+      );
+
+  Widget _statDivider() =>
+      Container(width: 1, height: 32, color: Colors.white24);
 
   Widget _fila({
     required IconData icon,
